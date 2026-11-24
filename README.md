@@ -1,6 +1,8 @@
 # TáGarantido
 
-Aplicativo React Native com Expo para importar notas fiscais XML e acompanhar as garantias dos produtos. A leitura, validação e persistência acontecem no próprio aparelho, sem API ou servidor.
+Projeto acadêmico desenvolvido na disciplina de Programação de Aplicativos. O TáGarantido é um app móvel de gerenciamento de garantias, criado para resolver um problema cotidiano: manter as compras e seus prazos de proteção organizados.
+
+O aplicativo usa React Native com Expo. A leitura, validação e persistência acontecem localmente no aparelho, sem API ou servidor.
 
 ## Executar o app
 
