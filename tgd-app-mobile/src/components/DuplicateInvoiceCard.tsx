@@ -4,17 +4,20 @@ import { colors } from '../theme/colors';
 
 type DuplicateInvoiceCardProps = {
   invoiceNumber: string;
+  valueUpdated: boolean;
   onDismiss: () => void;
 };
 
-export function DuplicateInvoiceCard({ invoiceNumber, onDismiss }: DuplicateInvoiceCardProps) {
+export function DuplicateInvoiceCard({ invoiceNumber, valueUpdated, onDismiss }: DuplicateInvoiceCardProps) {
   return (
     <View accessibilityLiveRegion="polite" style={styles.card}>
       <View style={styles.icon}><Text style={styles.iconText}>!</Text></View>
       <View style={styles.copy}>
-        <Text style={styles.title}>Nota fiscal já cadastrada</Text>
+        <Text style={styles.title}>{valueUpdated ? 'Valor da nota atualizado' : 'Nota fiscal já cadastrada'}</Text>
         <Text style={styles.description}>
-          A nota nº {invoiceNumber} já está no seu celular. Nenhum produto foi adicionado.
+          {valueUpdated
+            ? `O valor da nota nº ${invoiceNumber} foi corrigido. O total já pode ser consultado no Dashboard.`
+            : `A nota nº ${invoiceNumber} já está no seu celular. Nenhum produto foi adicionado.`}
         </Text>
       </View>
       <Pressable

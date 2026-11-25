@@ -9,7 +9,10 @@ const MAX_XML_BYTES = 10 * 1024 * 1024;
 let database: Promise<SQLite.SQLiteDatabase> | undefined;
 
 export class DuplicateInvoiceError extends Error {
-  constructor(public readonly invoiceNumber: string) {
+  constructor(
+    public readonly invoiceNumber: string,
+    public readonly valueUpdated = false,
+  ) {
     super(`A nota fiscal nº ${invoiceNumber} já está cadastrada.`);
     this.name = 'DuplicateInvoiceError';
   }
@@ -25,6 +28,7 @@ async function getDatabase(): Promise<SQLite.SQLiteDatabase> {
         product_name TEXT NOT NULL,
         purchase_date TEXT,
         invoice_number TEXT,
+        invoice_total_cents INTEGER,
         seller_name TEXT,
         warranty_months INTEGER NOT NULL,
         expires_at TEXT,
@@ -35,11 +39,32 @@ async function getDatabase(): Promise<SQLite.SQLiteDatabase> {
         invoice_number TEXT PRIMARY KEY NOT NULL,
         created_at TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS invoice_registry (
+        invoice_key TEXT PRIMARY KEY NOT NULL,
+        created_at TEXT NOT NULL
+      );
       INSERT OR IGNORE INTO imported_invoices (invoice_number, created_at)
       SELECT TRIM(invoice_number), MIN(created_at)
       FROM warranties
       WHERE invoice_number IS NOT NULL AND TRIM(invoice_number) <> ''
       GROUP BY TRIM(invoice_number);
+    `);
+    const columns = await db.getAllAsync<{ name: string }>('PRAGMA table_info(warranties)');
+    if (!columns.some((column) => column.name === 'invoice_total_cents')) {
+      await db.execAsync('ALTER TABLE warranties ADD COLUMN invoice_total_cents INTEGER;');
+    }
+    if (!columns.some((column) => column.name === 'invoice_key')) {
+      await db.execAsync('ALTER TABLE warranties ADD COLUMN invoice_key TEXT;');
+    }
+    await db.execAsync(`
+      UPDATE warranties
+      SET invoice_key = 'legacy:' || LOWER(TRIM(COALESCE(seller_name, ''))) || ':' || TRIM(invoice_number) || ':' || COALESCE(purchase_date, '')
+      WHERE invoice_key IS NULL AND invoice_number IS NOT NULL AND TRIM(invoice_number) <> '';
+      INSERT OR IGNORE INTO invoice_registry (invoice_key, created_at)
+      SELECT invoice_key, MIN(created_at)
+      FROM warranties
+      WHERE invoice_key IS NOT NULL
+      GROUP BY invoice_key;
     `);
     return db;
   })();
@@ -75,8 +100,8 @@ export async function deleteWarranty(id: string): Promise<void> {
   const db = await getDatabase();
   await db.withExclusiveTransactionAsync(async (transaction) => {
     await transaction.execAsync('PRAGMA secure_delete = ON;');
-    const warranty = await transaction.getFirstAsync<Pick<Warranty, 'invoice_number'>>(
-      'SELECT invoice_number FROM warranties WHERE id = ?',
+    const warranty = await transaction.getFirstAsync<Pick<Warranty, 'invoice_number' | 'invoice_key'>>(
+      'SELECT invoice_number, invoice_key FROM warranties WHERE id = ?',
       id,
     );
     if (!warranty) throw new Error('A garantia não foi encontrada no armazenamento local.');
@@ -86,10 +111,13 @@ export async function deleteWarranty(id: string): Promise<void> {
     if (!invoiceNumber) return;
 
     const remaining = await transaction.getFirstAsync<{ id: string }>(
-      'SELECT id FROM warranties WHERE TRIM(invoice_number) = ? LIMIT 1',
-      invoiceNumber,
+      'SELECT id FROM warranties WHERE invoice_key = ? LIMIT 1',
+      warranty.invoice_key,
     );
     if (!remaining) {
+      if (warranty.invoice_key) {
+        await transaction.runAsync('DELETE FROM invoice_registry WHERE invoice_key = ?', warranty.invoice_key);
+      }
       await transaction.runAsync('DELETE FROM imported_invoices WHERE invoice_number = ?', invoiceNumber);
     }
   });
@@ -151,28 +179,78 @@ export async function importInvoiceXml(file: { uri: string; name: string; size?:
 
   const db = await getDatabase();
   const invoiceNumber = items[0]?.invoice_number?.trim() || null;
+  const invoiceKey = items[0]?.invoice_key ?? null;
+  let duplicateInvoice = false;
+  let valueUpdated = false;
   await db.withExclusiveTransactionAsync(async (transaction) => {
-    if (invoiceNumber) {
-      const existing = await transaction.getFirstAsync<{ invoice_number: string }>(
-        'SELECT invoice_number FROM imported_invoices WHERE invoice_number = ?',
-        invoiceNumber,
+    if (invoiceKey) {
+      let existing = await transaction.getFirstAsync<{ invoice_key: string }>(
+        'SELECT invoice_key FROM invoice_registry WHERE invoice_key = ?',
+        invoiceKey,
       );
-      if (existing) throw new DuplicateInvoiceError(invoiceNumber);
+      let legacyKey: string | null = null;
+      if (!existing && invoiceNumber) {
+        const legacy = await transaction.getFirstAsync<{ invoice_key: string }>(
+          `SELECT invoice_key FROM warranties
+           WHERE TRIM(COALESCE(invoice_number, '')) = ?
+             AND LOWER(TRIM(COALESCE(seller_name, ''))) = LOWER(TRIM(COALESCE(?, '')))
+             AND COALESCE(purchase_date, '') = COALESCE(?, '')
+             AND invoice_key LIKE 'legacy:%'
+           LIMIT 1`,
+          invoiceNumber,
+          items[0]?.seller_name ?? null,
+          items[0]?.purchase_date ?? null,
+        );
+        if (legacy) {
+          existing = legacy;
+          legacyKey = legacy.invoice_key;
+        }
+      }
+      if (existing) {
+        duplicateInvoice = true;
+        if (legacyKey && legacyKey !== invoiceKey) {
+          await transaction.runAsync(
+            `UPDATE warranties SET invoice_key = ?
+             WHERE invoice_key = ? AND TRIM(COALESCE(invoice_number, '')) = ?`,
+            invoiceKey,
+            legacyKey,
+            invoiceNumber,
+          );
+          await transaction.runAsync('DELETE FROM invoice_registry WHERE invoice_key = ?', legacyKey);
+          await transaction.runAsync(
+            'INSERT OR IGNORE INTO invoice_registry (invoice_key, created_at) VALUES (?, ?)',
+            invoiceKey,
+            createdAt,
+          );
+        }
+        const invoiceTotalCents = items[0]?.invoice_total_cents ?? null;
+        if (invoiceTotalCents !== null) {
+          const updated = await transaction.runAsync(
+            'UPDATE warranties SET invoice_total_cents = ? WHERE invoice_key = ?',
+            invoiceTotalCents,
+            invoiceKey,
+          );
+          valueUpdated = updated.changes > 0;
+        }
+        return;
+      }
       await transaction.runAsync(
-        'INSERT INTO imported_invoices (invoice_number, created_at) VALUES (?, ?)',
-        invoiceNumber,
+        'INSERT INTO invoice_registry (invoice_key, created_at) VALUES (?, ?)',
+        invoiceKey,
         createdAt,
       );
     }
 
     for (const warranty of warranties) {
       await transaction.runAsync(
-        `INSERT INTO warranties (id, product_name, purchase_date, invoice_number, seller_name, warranty_months, expires_at, source, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO warranties (id, product_name, purchase_date, invoice_number, invoice_key, invoice_total_cents, seller_name, warranty_months, expires_at, source, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         warranty.id,
         warranty.product_name,
         warranty.purchase_date,
         warranty.invoice_number,
+        warranty.invoice_key,
+        warranty.invoice_total_cents,
         warranty.seller_name,
         warranty.warranty_months,
         warranty.expires_at,
@@ -181,5 +259,8 @@ export async function importInvoiceXml(file: { uri: string; name: string; size?:
       );
     }
   });
+  if (duplicateInvoice && invoiceNumber) {
+    throw new DuplicateInvoiceError(invoiceNumber, valueUpdated);
+  }
   return warranties;
 }

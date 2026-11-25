@@ -4,6 +4,8 @@ export type InvoiceItem = {
   product_name: string;
   purchase_date: string;
   invoice_number: string | null;
+  invoice_key: string | null;
+  invoice_total_cents: number | null;
   seller_name: string | null;
   expires_at: string | null;
 };
@@ -55,6 +57,36 @@ function firstText(value: unknown, wantedName: string): string | null {
   const raw = match?.['#text'] ?? match;
   if (typeof raw !== 'string' && typeof raw !== 'number') return null;
   return String(raw).trim() || null;
+}
+
+function firstMoneyValue(value: unknown, wantedName: string): number | null {
+  const raw = firstText(value, wantedName);
+  if (!raw || !/^\d+(?:[.,]\d{1,10})?$/.test(raw)) return null;
+  const amount = Number(raw.replace(',', '.'));
+  return Number.isFinite(amount) && amount >= 0 ? amount : null;
+}
+
+function moneyCents(value: number): number | null {
+  const cents = Math.round(value * 100);
+  return Number.isSafeInteger(cents) && cents >= 0 ? cents : null;
+}
+
+function totalProductValueCents(details: XmlNode[]): number | null {
+  if (!details.length) return null;
+  let total = 0;
+  for (const detail of details) {
+    if (firstText(detail, 'indTot') === '0') continue;
+    const productValue = firstMoneyValue(detail, 'vProd');
+    if (productValue !== null) {
+      total += Math.round(productValue * 100);
+      continue;
+    }
+    const unitValue = firstMoneyValue(detail, 'vUnCom');
+    const quantity = firstText(detail, 'qCom');
+    if (unitValue === null || !quantity || !/^\d+(?:[.,]\d+)?$/.test(quantity)) return null;
+    total += Math.round(unitValue * Number(quantity.replace(',', '.')) * 100);
+  }
+  return Number.isSafeInteger(total) && total >= 0 ? total : null;
 }
 
 function textContent(value: unknown): string {
@@ -146,12 +178,26 @@ export function validateWarrantyXml(xml: string): InvoiceItem[] {
 
   const root = parser.parse(xml) as XmlNode;
   const invoiceNumber = firstText(root, 'nNF');
+  const issuer = descendants(root, 'emit')[0];
+  const issuerIdentity = issuer
+    ? firstText(issuer, 'CNPJ') ?? firstText(issuer, 'CPF') ?? firstText(issuer, 'xNome')
+    : null;
+  const invoiceModel = firstText(root, 'mod') ?? '55';
+  const invoiceSeries = firstText(root, 'serie') ?? '';
+  const invoiceKey = invoiceNumber && issuerIdentity
+    ? `nfe:${issuerIdentity.trim().toLocaleLowerCase('pt-BR')}:${invoiceModel}:${invoiceSeries}:${invoiceNumber}`
+    : null;
+  const details = descendants(root, 'det');
+  const invoiceAmount = firstMoneyValue(root, 'vNF');
+  const invoiceTotalCents = invoiceAmount === null
+    ? totalProductValueCents(details)
+    : moneyCents(invoiceAmount);
   const invoiceDate = validDate(firstText(root, 'dhEmi') ?? firstText(root, 'dEmi'));
   const sellerName = firstText(root, 'xNome');
   const invoiceNotes = textContent(descendants(root, 'infCpl'));
   const items: InvoiceItem[] = [];
 
-  for (const detail of descendants(root, 'det')) {
+  for (const detail of details) {
     const productName = firstText(detail, 'xProd');
     if (!productName) continue;
     const itemNotes = textContent(descendants(detail, 'infAdProd'));
@@ -159,6 +205,8 @@ export function validateWarrantyXml(xml: string): InvoiceItem[] {
       product_name: productName,
       purchase_date: invoiceDate ?? '',
       invoice_number: invoiceNumber,
+      invoice_key: invoiceKey,
+      invoice_total_cents: invoiceTotalCents,
       seller_name: sellerName,
       expires_at: warrantyEndDate(itemNotes, invoiceDate)
         ?? warrantyEndDate(textContent(detail), invoiceDate)
@@ -170,12 +218,20 @@ export function validateWarrantyXml(xml: string): InvoiceItem[] {
     const nfseInfo = descendants(root, 'infNFSe')[0] ?? root;
     const dpsInfo = descendants(root, 'infDPS')[0];
     const nfseNumber = firstText(nfseInfo, 'nNFSe') ?? firstText(nfseInfo, 'nDPS');
+    const issuer = descendants(nfseInfo, 'emit')[0] ?? (dpsInfo ? descendants(dpsInfo, 'prest')[0] : undefined);
+    const nfseIssuerIdentity = issuer
+      ? firstText(issuer, 'CNPJ') ?? firstText(issuer, 'CPF') ?? firstText(issuer, 'xNome')
+      : null;
+    const nfseKey = nfseNumber && nfseIssuerIdentity
+      ? `nfse:${nfseIssuerIdentity.trim().toLocaleLowerCase('pt-BR')}:${nfseNumber}`
+      : null;
+    const nfseAmount = firstMoneyValue(nfseInfo, 'vNFSe') ?? firstMoneyValue(nfseInfo, 'vServ');
+    const nfseTotalCents = nfseAmount === null ? null : moneyCents(nfseAmount);
     const nfseDate = validDate(
       (dpsInfo ? firstText(dpsInfo, 'dCompet') : null)
       ?? (dpsInfo ? firstText(dpsInfo, 'dhEmi') : null)
       ?? firstText(nfseInfo, 'dhProc'),
     );
-    const issuer = descendants(nfseInfo, 'emit')[0] ?? (dpsInfo ? descendants(dpsInfo, 'prest')[0] : undefined);
     const nfseSeller = issuer ? firstText(issuer, 'xNome') : null;
 
     for (const service of descendants(root, 'cServ')) {
@@ -187,6 +243,8 @@ export function validateWarrantyXml(xml: string): InvoiceItem[] {
         product_name: productName,
         purchase_date: purchaseDate ?? '',
         invoice_number: nfseNumber,
+        invoice_key: nfseKey,
+        invoice_total_cents: nfseTotalCents,
         seller_name: nfseSeller,
         expires_at: warrantyEndDate(textContent(service), purchaseDate)
           ?? warrantyEndDate(invoiceNotes, purchaseDate),

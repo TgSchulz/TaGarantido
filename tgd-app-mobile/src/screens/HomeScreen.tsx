@@ -34,7 +34,9 @@ function warrantyKey(warranty: Warranty): string {
 }
 
 // A tela coordena carregamento e eventos; a apresentação de cada bloco fica nos componentes.
-export function HomeScreen() {
+type HomeScreenProps = { onDashboardPress: () => void };
+
+export function HomeScreen({ onDashboardPress }: HomeScreenProps) {
   const {
     warranties,
     loading,
@@ -48,6 +50,7 @@ export function HomeScreen() {
   const [working, setWorking] = useState(false);
   const [addSheetVisible, setAddSheetVisible] = useState(false);
   const [duplicateInvoiceNumber, setDuplicateInvoiceNumber] = useState<string | null>(null);
+  const [duplicateValueUpdated, setDuplicateValueUpdated] = useState(false);
 
   useEffect(() => {
     if (loadError) Alert.alert('Não foi possível carregar', loadError);
@@ -57,6 +60,7 @@ export function HomeScreen() {
     // Primeiro libera a folha de ações; em seguida o seletor nativo escolhe o arquivo do aparelho.
     setAddSheetVisible(false);
     setDuplicateInvoiceNumber(null);
+    setDuplicateValueUpdated(false);
     try {
       // Alguns provedores Android atribuem MIME inconsistente a XML; a validação local confere o arquivo.
       const result = await DocumentPicker.getDocumentAsync({
@@ -79,7 +83,9 @@ export function HomeScreen() {
       );
     } catch (error) {
       if (error instanceof DuplicateInvoiceError) {
+        if (error.valueUpdated) await refresh();
         setDuplicateInvoiceNumber(error.invoiceNumber);
+        setDuplicateValueUpdated(error.valueUpdated);
       } else {
         Alert.alert('Falha ao importar XML', error instanceof Error ? error.message : 'Tente novamente.');
       }
@@ -96,11 +102,12 @@ export function HomeScreen() {
     <SafeAreaView style={styles.safeArea} edges={['top', 'right', 'bottom', 'left']}>
       <StatusBar barStyle="dark-content" />
       <View style={styles.pageContent}>
-        <HomeHeader />
+        <HomeHeader onDashboardPress={onDashboardPress} />
         <View style={styles.content}>
           {duplicateInvoiceNumber ? (
             <DuplicateInvoiceCard
               invoiceNumber={duplicateInvoiceNumber}
+              valueUpdated={duplicateValueUpdated}
               onDismiss={() => setDuplicateInvoiceNumber(null)}
             />
           ) : null}
