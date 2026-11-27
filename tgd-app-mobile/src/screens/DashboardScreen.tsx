@@ -80,18 +80,23 @@ export function DashboardScreen({ onBack }: DashboardScreenProps) {
         ) : (
           <>
             <View style={styles.primaryCard}>
-              <Text style={styles.cardLabel}>VALOR TOTAL DAS NOTAS</Text>
+              <Text style={styles.cardLabel}>Valor Total em Garantia</Text>
               <Text style={styles.total}>{loading ? 'Carregando...' : formatCurrency(metrics.totalCents)}</Text>
-              <Text style={styles.cardHint}>
-                {loading ? 'Buscando os dados salvos neste aparelho' : `${metrics.knownInvoiceCount} de ${metrics.invoiceCount} notas com valor identificado`}
-              </Text>
+            </View>
+
+            <View style={styles.secondaryCard}>
+              <View style={styles.numberBadge}><Text style={styles.number}>{loading ? '—' : metrics.invoiceCount}</Text></View>
+              <View style={styles.metricCopy}>
+                <Text style={styles.metricTitle}>Notas Cadastradas</Text>
+                <Text style={styles.metricHint}>Notas fiscais importadas</Text>
+              </View>
             </View>
 
             <View style={styles.secondaryCard}>
               <View style={styles.numberBadge}><Text style={styles.number}>{loading ? '—' : metrics.warrantiesCount}</Text></View>
               <View style={styles.metricCopy}>
-                <Text style={styles.metricTitle}>Garantias cadastradas</Text>
-                <Text style={styles.metricHint}>Produtos protegidos registrados no app</Text>
+                <Text style={styles.metricTitle}>Produtos em Garantia</Text>
+                <Text style={styles.metricHint}>Itens cadastrados nas notas importadas</Text>
               </View>
             </View>
 
@@ -118,11 +123,10 @@ const styles = StyleSheet.create({
   eyebrow: { color: colors.green, fontSize: 10, letterSpacing: 1.5, fontWeight: '800' },
   title: { color: colors.ink, fontWeight: '800', fontSize: 30, marginTop: 6 },
   subtitle: { color: colors.muted, fontSize: 14, lineHeight: 20, marginTop: 7, marginBottom: 24 },
-  primaryCard: { backgroundColor: colors.ink, borderRadius: 22, padding: 22, marginBottom: 14 },
-  cardLabel: { color: colors.paleGreenAccent, fontSize: 10, fontWeight: '700', letterSpacing: 1.2 },
-  total: { color: colors.white, fontWeight: '800', fontSize: 32, marginTop: 11 },
-  cardHint: { color: colors.paleGreenText, fontSize: 12, marginTop: 9 },
-  secondaryCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.white, borderWidth: 1, borderColor: colors.line, borderRadius: 18, padding: 17 },
+  primaryCard: { minHeight: 112, justifyContent: 'center', backgroundColor: colors.ink, borderRadius: 22, padding: 22, marginBottom: 14 },
+  cardLabel: { color: colors.paleGreenAccent, fontSize: 10, fontWeight: '700', letterSpacing: 1.2, textAlign: 'center' },
+  total: { color: colors.white, fontWeight: '800', fontSize: 32, textAlign: 'center', marginTop: 8 },
+  secondaryCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.white, borderWidth: 1, borderColor: colors.line, borderRadius: 18, padding: 17, marginBottom: 10 },
   numberBadge: { width: 52, height: 52, borderRadius: 16, backgroundColor: colors.paleGreen, alignItems: 'center', justifyContent: 'center' },
   number: { color: colors.green, fontSize: 21, fontWeight: '800' },
   metricCopy: { flex: 1, marginLeft: 14 },
