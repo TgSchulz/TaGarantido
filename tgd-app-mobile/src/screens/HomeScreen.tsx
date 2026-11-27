@@ -18,11 +18,13 @@ import { DuplicateInvoiceCard } from '../components/DuplicateInvoiceCard';
 import { EmptyWarranties } from '../components/EmptyWarranties';
 import { FloatingActionButton } from '../components/FloatingActionButton';
 import { HomeHeader } from '../components/HomeHeader';
+import { InfoModal } from '../components/InfoModal';
 import { LoadingOverlay } from '../components/LoadingOverlay';
 import { WarrantyCard } from '../components/WarrantyCard';
 import { WarrantySummary } from '../components/WarrantySummary';
 import { DuplicateInvoiceError } from '../services/warranties';
 import { useWarranties } from '../hooks/useWarranties';
+import { syncWarrantyReminderSchedules } from '../services/warrantyNotifications';
 import { colors } from '../theme/colors';
 import type { Warranty } from '../types/warranty';
 
@@ -34,9 +36,9 @@ function warrantyKey(warranty: Warranty): string {
 }
 
 // A tela coordena carregamento e eventos; a apresentação de cada bloco fica nos componentes.
-type HomeScreenProps = { onDashboardPress: () => void };
+type HomeScreenProps = { onDashboardPress: () => void; onNotificationsPress: () => void };
 
-export function HomeScreen({ onDashboardPress }: HomeScreenProps) {
+export function HomeScreen({ onDashboardPress, onNotificationsPress }: HomeScreenProps) {
   const {
     warranties,
     loading,
@@ -51,10 +53,19 @@ export function HomeScreen({ onDashboardPress }: HomeScreenProps) {
   const [addSheetVisible, setAddSheetVisible] = useState(false);
   const [duplicateInvoiceNumber, setDuplicateInvoiceNumber] = useState<string | null>(null);
   const [duplicateValueUpdated, setDuplicateValueUpdated] = useState(false);
+  const [importFeedback, setImportFeedback] = useState<{ title: string; message: string } | null>(null);
 
   useEffect(() => {
     if (loadError) Alert.alert('Não foi possível carregar', loadError);
   }, [loadError]);
+
+  useEffect(() => {
+    if (!loading) {
+      void syncWarrantyReminderSchedules(warranties).catch((error) => {
+        console.warn('Não foi possível atualizar os avisos de garantia.', error);
+      });
+    }
+  }, [loading, warranties]);
 
   const handleImportXml = async () => {
     // Primeiro libera a folha de ações; em seguida o seletor nativo escolhe o arquivo do aparelho.
@@ -77,10 +88,10 @@ export function HomeScreen({ onDashboardPress }: HomeScreenProps) {
       const pendingNotice = pendingCount
         ? ` ${pendingCount} ${pendingCount === 1 ? 'card precisa' : 'cards precisam'} da data final.`
         : '';
-      Alert.alert(
-        'Nota adicionada',
-        `${created.length} ${created.length === 1 ? 'produto foi importado' : 'produtos foram importados'} do XML.${pendingNotice}`,
-      );
+      setImportFeedback({
+        title: 'Nota adicionada',
+        message: `${created.length} ${created.length === 1 ? 'produto foi importado' : 'produtos foram importados'} do XML.${pendingNotice}`,
+      });
     } catch (error) {
       if (error instanceof DuplicateInvoiceError) {
         if (error.valueUpdated) await refresh();
@@ -102,7 +113,7 @@ export function HomeScreen({ onDashboardPress }: HomeScreenProps) {
     <SafeAreaView style={styles.safeArea} edges={['top', 'right', 'bottom', 'left']}>
       <StatusBar barStyle="dark-content" />
       <View style={styles.pageContent}>
-        <HomeHeader onDashboardPress={onDashboardPress} />
+        <HomeHeader onDashboardPress={onDashboardPress} onNotificationsPress={onNotificationsPress} />
         <View style={styles.content}>
           {duplicateInvoiceNumber ? (
             <DuplicateInvoiceCard
@@ -153,6 +164,14 @@ export function HomeScreen({ onDashboardPress }: HomeScreenProps) {
 
       {/* Componentes visuais recebem callbacks; a lógica continua concentrada nesta tela. */}
       {working ? <LoadingOverlay label="Importando sua nota fiscal..." /> : null}
+      {importFeedback ? (
+        <InfoModal
+          visible
+          title={importFeedback.title}
+          message={importFeedback.message}
+          onDismiss={() => setImportFeedback(null)}
+        />
+      ) : null}
       <AddWarrantySheet
         visible={addSheetVisible}
         onClose={() => setAddSheetVisible(false)}

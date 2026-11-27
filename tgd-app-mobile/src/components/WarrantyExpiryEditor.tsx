@@ -15,6 +15,10 @@ export function WarrantyExpiryEditor({ warrantyId, purchaseDate, onSave }: Warra
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [pickerVisible, setPickerVisible] = useState(false);
   const [saving, setSaving] = useState(false);
+  const purchaseDateValue = new Date(`${purchaseDate}T12:00:00`);
+  const today = new Date();
+  today.setHours(12, 0, 0, 0);
+  const defaultExpiryDate = purchaseDateValue > today ? purchaseDateValue : today;
 
   const saveDate = async () => {
     if (!selectedDate) return;
@@ -29,8 +33,8 @@ export function WarrantyExpiryEditor({ warrantyId, purchaseDate, onSave }: Warra
   };
 
   const openPicker = () => {
-    const minimumDate = new Date(`${purchaseDate}T00:00:00`);
-    const initialDate = selectedDate ?? new Date(`${purchaseDate}T12:00:00`);
+    const minimumDate = purchaseDateValue;
+    const initialDate = selectedDate ?? defaultExpiryDate;
     if (Platform.OS === 'android') {
       DateTimePickerAndroid.open({
         value: initialDate,
@@ -52,7 +56,7 @@ export function WarrantyExpiryEditor({ warrantyId, purchaseDate, onSave }: Warra
       <Text style={styles.description}>A data inicial é a data da compra indicada na nota fiscal.</Text>
       {Platform.OS === 'ios' && pickerVisible ? (
         <DateTimePicker
-          value={selectedDate ?? new Date(`${purchaseDate}T12:00:00`)}
+          value={selectedDate ?? defaultExpiryDate}
           mode="date"
           minimumDate={new Date(`${purchaseDate}T00:00:00`)}
           onValueChange={(_event, date) => setSelectedDate(date)}
