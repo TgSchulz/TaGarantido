@@ -29,6 +29,21 @@ export function toDateKey(date: Date): string {
 
 const DAY_IN_MS = 86_400_000;
 
+function parseDateKey(value: string): Date | null {
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  const [, yearText, monthText, dayText] = match;
+  const date = new Date(Date.UTC(Number(yearText), Number(monthText) - 1, Number(dayText)));
+  return date.toISOString().slice(0, 10) === value ? date : null;
+}
+
+export function calendarDaysUntil(value: string, now = new Date()): number | null {
+  const expiry = parseDateKey(value);
+  if (!expiry) return null;
+  const today = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+  return Math.round((expiry.getTime() - today) / DAY_IN_MS);
+}
+
 function addCalendarMonths(date: Date, months: number): Date {
   const targetMonth = date.getUTCMonth() + months;
   const year = date.getUTCFullYear() + Math.floor(targetMonth / 12);
@@ -40,12 +55,11 @@ function addCalendarMonths(date: Date, months: number): Date {
 export function protectionRemaining(value: string | null): ProtectionRemaining | null {
   if (!value) return null;
 
-  // Use the device's local calendar day, then compare UTC dates to avoid DST and time-of-day drift.
   const now = new Date();
   const today = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
-  const expiry = new Date(`${value}T00:00:00Z`);
-  if (Number.isNaN(expiry.getTime())) return null;
-  const days = Math.floor((expiry.getTime() - today.getTime()) / DAY_IN_MS);
+  const expiry = parseDateKey(value);
+  const days = calendarDaysUntil(value, now);
+  if (!expiry || days === null) return null;
   if (days < 0) return { value: days, unit: 'days', expired: true };
 
   let months = (expiry.getUTCFullYear() - today.getUTCFullYear()) * 12

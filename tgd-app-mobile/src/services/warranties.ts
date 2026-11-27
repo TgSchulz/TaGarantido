@@ -43,6 +43,10 @@ async function getDatabase(): Promise<SQLite.SQLiteDatabase> {
         invoice_key TEXT PRIMARY KEY NOT NULL,
         created_at TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS notification_reads (
+        notification_id TEXT PRIMARY KEY NOT NULL,
+        read_at TEXT NOT NULL
+      );
       INSERT OR IGNORE INTO imported_invoices (invoice_number, created_at)
       SELECT TRIM(invoice_number), MIN(created_at)
       FROM warranties
@@ -96,6 +100,25 @@ export async function getWarranties(): Promise<Warranty[]> {
   return db.getAllAsync<Warranty>('SELECT * FROM warranties ORDER BY created_at DESC');
 }
 
+export async function getReadNotificationIds(): Promise<string[]> {
+  const db = await getDatabase();
+  const rows = await db.getAllAsync<{ notification_id: string }>('SELECT notification_id FROM notification_reads');
+  return rows.map((row) => row.notification_id);
+}
+
+export async function setNotificationRead(notificationId: string, isRead: boolean): Promise<void> {
+  const db = await getDatabase();
+  if (isRead) {
+    await db.runAsync(
+      'INSERT OR IGNORE INTO notification_reads (notification_id, read_at) VALUES (?, ?)',
+      notificationId,
+      new Date().toISOString(),
+    );
+  } else {
+    await db.runAsync('DELETE FROM notification_reads WHERE notification_id = ?', notificationId);
+  }
+}
+
 export async function deleteWarranty(id: string): Promise<void> {
   const db = await getDatabase();
   await db.withExclusiveTransactionAsync(async (transaction) => {
@@ -107,6 +130,7 @@ export async function deleteWarranty(id: string): Promise<void> {
     if (!warranty) throw new Error('A garantia não foi encontrada no armazenamento local.');
 
     await transaction.runAsync('DELETE FROM warranties WHERE id = ?', id);
+    await transaction.runAsync('DELETE FROM notification_reads WHERE notification_id LIKE ?', `${id}:%`);
     const invoiceNumber = warranty.invoice_number?.trim();
     if (!invoiceNumber) return;
 
